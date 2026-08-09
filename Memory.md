@@ -1,6 +1,6 @@
 # Memory.md — PPI Network Filtering for Disease Module Detection (thesis project)
 
-_Last updated: 2026-08-07_
+_Last updated: 2026-08-10_
 
 ## Project summary
 
@@ -107,8 +107,69 @@ files. Largest new/changed files:
 - `bin/graph_tool_parser.py` (+48) — node-degree calc moved here
 - `docs/CONTRIBUTING.md` — largely rewritten/trimmed (-202/+~)
 
+## 2026-08-09/10 — per-row `source` and `threshold` samplesheet columns (`tissue_specific_filtering` branch, uncommitted)
+
+Follow-up work on the `tissue_specific_filtering` branch (still working-tree
+changes, not yet committed as of 2026-08-10). Previously `--filtering_source`
+and `--filtering_threshold` were pipeline-wide params applied identically to
+every samplesheet row; this made it impossible to filter different
+seed/network pairs against different expression sources or thresholds in one
+run. Both are now per-row samplesheet columns:
+
+- **`assets/schema_input.json`** — added optional `source` (string) and
+  `threshold` (number) columns alongside the existing `tissue` column.
+- **`subworkflows/local/utils_nfcore_diseasemodulediscovery_pipeline/main.nf`**
+  — samplesheet parsing now destructures 7 columns (was 5); a row that sets
+  `tissue` but leaves `source` and/or `threshold` blank now hard-errors
+  ("must all be specified together"), no silent fallback to the global
+  params. The non-samplesheet (`--seeds`/`--network` CLI) path still uses the
+  global `--filtering_source`/`--filtering_threshold` params, appended via
+  `.combine(...)` to keep tuple arity consistent with the samplesheet path.
+- **`workflows/diseasemodulediscovery.nf`** — `ch_tissue_specific_network`/
+  `ch_tissue_specific_seeds` thread `source` and `threshold` through the
+  channel tuples. Both are folded into `meta.id`/`meta.network_id` as
+  `<network>.<tissue>.<source>.<threshold>` — this was necessary so that (a)
+  output files across different source/threshold combinations for the same
+  seed/network/tissue don't collide, and (b) the samplesheet can list the
+  *same* seed/network/tissue/source combination multiple times with
+  different thresholds. `network_id` is also what `ch_seeds` and
+  `ch_network_gt` are joined on downstream (line ~210-211), so seeds and
+  source/threshold must be kept in sync there too.
+- **`modules/local/tissue_specific_filtering/main.nf`** — process input
+  tuple gained `val(source)` and `val(threshold)`; the script call now uses
+  `${source}`/`${threshold}` instead of `${params.filtering_source}`/
+  `${params.filtering_threshold}`.
+- **`bin/tissue_specific_filtering.py`** — `filter_network()` and
+  `save_expression_distribution()` now take `source` and `threshold` and
+  save output files as `{stem}.{tissue}.{source}.{threshold}.gt` /
+  `...expression_distribution.yaml`, matching the new `meta.id` naming
+  convention above (this was the fix for a "file not found" error seen
+  mid-session, twice — once when `source` was added to naming, again when
+  `threshold` was added; the pattern is: any field folded into `meta.id` in
+  the workflow must also be folded into the Python script's output
+  filenames, since the module declares its output path as `${meta.id}.gt`).
+- **`tests/test_samplesheet.csv`** — updated to the new `seeds,network,
+  tissue,source,threshold` header with real values (GTEx/PAXDB/TCGA rows).
+
+Design decisions locked in during this work (ask before changing):
+- One `source`/`threshold` value applies to *all* tissues listed in a row's
+  semicolon-separated `tissue` field (no per-tissue-within-a-row overrides).
+- Missing `source`/`threshold` when `tissue` is set is a hard pipeline error,
+  not a fallback to the global param — this was an explicit user correction
+  during the session (initially planned as fallback-to-global, user rejected
+  that and required the error instead).
+- `--custom_filtering_file` remains a separate, global-only param — not
+  made per-row in this pass.
+- Doc updates (`docs/usage.md`, `nextflow_schema.json` help text) for the
+  `source` column were written once, then explicitly reverted at the user's
+  request ("remove the document update") — don't re-add without asking.
+
 ## Open items / things to check next session
 
+- The `source`/`threshold` samplesheet work above is uncommitted on
+  `tissue_specific_filtering` — needs a commit (and ideally an
+  nf-test/CI run with docker, not yet verified end-to-end since no
+  `nextflow` binary was available in the assistant's sandbox).
 - `af736f2 "failing yaml version of network degree distribution plot"` —
   commit message implies this was left in a broken/failing state; worth
   checking if it was fixed later or still needs attention.
