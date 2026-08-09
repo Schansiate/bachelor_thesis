@@ -1,6 +1,6 @@
 # Memory.md — PPI Network Filtering for Disease Module Detection (thesis project)
 
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-07_
 
 ## Project summary
 
@@ -18,7 +18,9 @@ This memory file covers two strands of work:
 1. The pipeline-side feature branches implementing tissue-specific filtering
    (in the `diseasemodulediscovery` fork).
 2. Exploratory analysis notebooks/scripts kept in this thesis repo
-   (`playground.ipynb`, `merge_paxdb.py`).
+   (as of 2026-08-07: `pipeline_experimentation.ipynb`,
+   `filtering_source_exploration.ipynb`, `filtering_results.ipynb`,
+   `merge_paxdb.py` — see §2 for how these were split out).
 
 ## 1. Pipeline branches (`diseasemodulediscovery` fork)
 
@@ -116,48 +118,44 @@ files. Largest new/changed files:
 - Confirm whether `tissue_specific_filtering-multiple_filtering_sources` can
   now be deleted/archived since it's fully merged into `tissue_specific_filtering`.
 
-## 2. Exploratory analysis in this repo (`playground.ipynb`, `merge_paxdb.py`)
+## 2. Exploratory analysis in this repo
 
-`playground.ipynb` is untracked (no git history), so changes are summarized
-from its current content rather than a diff. It contains 6 cells, evolving
-from a toy demo into a real PaxDb/GTEx comparison analysis:
+**2026-08-07 — split into three notebooks.** `playground.ipynb` (scratch/API
+trials) and `filtering_sanity_check.ipynb` (GTEx filtering validation:
+contamination analysis, expression CDF, KEGG pathway-survival heatmaps,
+PaxDB BRAIN variant) were merged and re-split by purpose into:
 
-- **Cell 0** — Toy demo: loads the graph-tool `karate` example graph, assigns
-  random per-vertex "expression" values, colors nodes by expression on a
-  Reds colormap, and renders it with `sfdp_layout` to
-  `toy_expression_graph.pdf`. Early sanity-check for the expression-coloring
-  approach later added to `bin/visualize_modules.py` in the pipeline.
-- **Cell 1** — First TCGA access attempt via `xenaPython`: connects to the
-  UCSC Xena `gdcHub`, looks up the "GDC TCGA Lung Adenocarcinoma (LUAD)"
-  cohort, and lists its `star_tpm` datasets. Precursor to the pipeline's
-  `7a974b0 "added TCGA as source"` commit.
-- **Cell 2** — Downloads and loads one of those TCGA TPM datasets directly
-  via `requests`/`gzip` into a pandas DataFrame (genes × samples).
-- **Cells 3–5** — Three iterations of the same analysis: **clustering
-  tissues by cross-referencing PaxDb protein abundance against GTEx median
-  gene TPM**, to check whether protein- and mRNA-level tissue expression
-  profiles agree.
-  - Loads `paxdb_all_tissues.tsv` (wide format, produced by
-    `merge_paxdb.py`, see below) and
-    `GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_median_tpm.gct.gz`,
-    joins on shared gene symbols, log2-transforms.
-  - Restricts to a curated 10-tissue subset (`PAXDB_TO_GTEX` dict) with an
-    unambiguous 1:1 mapping between PaxDb and GTEx tissue naming (excludes
-    sub-regions like `Brain_*` or `SKIN_FIBROBLAST` that have no single
-    counterpart).
-  - **Cell 3**: tissue-by-tissue Spearman correlation → seaborn
-    `clustermap` (diverging `vlag` colormap, source-colored row/col bars for
-    PaxDb vs. GTEx) → saved to `paxdb_gtex_tissue_clustermap.pdf`.
-  - **Cell 4**: same setup but with cosine similarity instead of Spearman
-    correlation, `mako` colormap — a variant tried for comparison, adds NaN
-    sanity checks.
-  - **Cell 5**: reverts to the Spearman-correlation version from cell 3
-    (essentially a clean re-run/final version), with a `print("done")` at
-    the end.
-  - Net takeaway: iterating on the right similarity metric and colormap to
-    visualize how well protein abundance (PaxDb) and transcript level
-    (GTEx) tissue profiles cluster together — evidence-gathering for using
-    PaxDb as an additional/alternative filtering source in the pipeline.
+- **`pipeline_experimentation.ipynb`** — scratch/API trials: expression
+  node-filtering trials, ID-space mapping (Ensembl↔HGNC↔UniProt↔Entrez via
+  pybiomart/g:Profiler/UniProt idmapping/mygene.info), ProteomicsDB API
+  exploration, expression-colored graph viz trial, UCSC Xena/TCGA API trial.
+- **`filtering_source_exploration.ipynb`** — analysis of the expression
+  sources themselves, independent of any filtering run: GTEx expression CDF
+  vs. network nodes, GTEx-vs-PaxDB tissue clustering (Spearman + cosine).
+  Currently GTEx-only for CDF; PCA of expression sources is a planned
+  addition, not yet implemented.
+- **`filtering_results.ipynb`** — results after running the filter: GTEx +
+  PaxDB filtering runs across thresholds, filtering statistics, tissue
+  contamination analysis, KEGG pathway-survival heatmaps (now with an
+  **"unfiltered" baseline column** showing what fraction of each pathway's
+  full KEGG gene set is present in the raw network before any threshold is
+  applied — added 2026-08-07 to distinguish "gene never made it into the
+  network" from "gene was filtered out by the threshold"), and downstream
+  disease-module Jaccard-similarity clustering.
+
+Both original notebooks were deleted (`git rm -f`) after their content was
+fully migrated; recoverable via git history if needed. `playground.ipynb`
+had no prior git history before this session's commit `6be61cf`, so its
+content is summarized from state rather than diffed below.
+
+By the time of the 2026-08-07 split, `playground.ipynb` had grown well past
+the 6-cell version previously summarized here (this section had gone stale —
+it undercounted the file, which actually held 34 cells including a full
+PaxDb/GTEx tissue-clustering analysis, ID-space mapping trials, ProteomicsDB
+and UCSC Xena/TCGA API exploration, and a toy graph-coloring demo). See the
+notebook bullets above for where each piece now lives; don't trust a
+cell-by-cell breakdown of the old file going forward since it no longer
+exists — check the three current notebooks directly instead.
 
 `merge_paxdb.py` — standalone script (not yet part of the pipeline) that
 downloads all per-tissue PaxDb integrated protein-abundance datasets for a
@@ -165,15 +163,22 @@ given organism (default `9606`, human) from `pax-db.org` (v6.1) and merges
 them into one wide TSV (`id` + one column per tissue), mirroring the layout
 of the GTEx `gene_median_tpm` file used by
 `bin/tissue_specific_filtering.py` in the pipeline. This is the script that
-produces `paxdb_all_tissues.tsv` consumed by the notebook above.
+produces `paxdb_all_tissues.tsv` consumed by
+`filtering_source_exploration.ipynb`.
 
 ### Open items
-- `playground.ipynb` is exploratory/scratch — worth deciding whether the
-  PaxDb/GTEx clustering analysis (cells 3–5) should be cleaned up into a
-  proper thesis analysis script, and whether cells 0–2 (toy graph, TCGA
-  Xena fetch) are still needed or can be dropped once superseded by the
-  pipeline's own TCGA/visualization support.
+- Decide whether `pipeline_experimentation.ipynb`'s trial-and-error cells
+  (ID mapping, ProteomicsDB/Xena API exploration) are still needed now that
+  the pipeline's own ID-mapping and TCGA support exist, or can be trimmed.
+- PCA of expression sources (mentioned as a target analysis for
+  `filtering_source_exploration.ipynb`) is not yet implemented — only the
+  GTEx expression CDF and GTEx-vs-PaxDB clustering exist so far.
 - `merge_paxdb.py` is currently a standalone helper in this repo; consider
   whether it should move into the pipeline fork's `bin/` alongside
   `tissue_specific_filtering.py` if PaxDb becomes a supported filtering
   source there.
+- None of this session's notebook changes (§2, 2026-08-07) are committed
+  yet — `playground.ipynb`/`filtering_sanity_check.ipynb` deletions are
+  staged, the 3 new notebooks are untracked. Repo is also still mid-merge
+  (diverged from `origin/main`, unresolved `git merge` in progress) —
+  unrelated to this session's work, flagged but not touched.
