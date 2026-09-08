@@ -1,0 +1,6 @@
+[submodule "bachelor_thesis"]
+	path = bachelor_thesis
+	url = https://git@sharelatex.tum.de/git/6a8713fbba68b43aab578472
+[submodule "diseasemodulediscovery"]
+	path = diseasemodulediscovery
+	url = https://github.com/Schansiate/diseasemodulediscovery.git

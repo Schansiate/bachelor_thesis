@@ -1,6 +1,6 @@
 # Memory.md — PPI Network Filtering for Disease Module Detection (thesis project)
 
-_Last updated: 2026-08-10_
+_Last updated: 2026-09-01_
 
 ## Project summary
 
@@ -164,12 +164,90 @@ Design decisions locked in during this work (ask before changing):
   `source` column were written once, then explicitly reverted at the user's
   request ("remove the document update") — don't re-add without asking.
 
+## 2026-08-24 → 2026-09-01 — CRAPome filtering + subworkflow extraction + Nextflow-side downloads (`tissue_specific_filtering` branch)
+
+Since the 2026-08-10 entry above, `bin/tissue_specific_filtering.py` and
+`modules/local/tissue_specific_filtering/` were renamed to
+`bin/context_specific_filtering.py` / `modules/local/context_specific_filtering/`
+(commit `361960b`, 2026-08-24, already pushed) — "tissue" was generalized to
+"context" throughout naming since filtering sources now include non-tissue
+contexts like TCGA cancer types and CRAPome. **Any reference to
+`tissue_specific_filtering.py`/`.nf` elsewhere in this memory file (§1 above)
+is now stale — the current name is `context_specific_filtering`.**
+
+Three commits on `tissue_specific_filtering` as of 2026-09-01 are **unpushed**
+(local-only, not yet on `origin/tissue_specific_filtering`):
+
+- **`3214511` "implemented crapome filtering"** (2026-08-31) — adds CRAPome
+  (AP-MS contaminant database, see `CLAUDE.md`) as a filtering source, run as
+  a *second*, separate filtering pass rather than a `filtering_source` value
+  a user picks per samplesheet row. New `CRAPOME_FILTERING` process instance
+  (same `CONTEXT_SPECIFIC_FILTERING` module, aliased) runs after context
+  filtering when `--filter_crapomes` is true, at a fixed
+  `--crapome_filtering_threshold` (spectral-count cutoff, default 1000) —
+  independent of the per-row `source`/`threshold` samplesheet columns.
+  `filter_network()` in `bin/context_specific_filtering.py` special-cases
+  `source == "CRAPome"`: it skips `save_expression_distribution()` (no
+  meaningful expression curve for a contaminant flag) and writes a
+  differently-shaped stats row (`write_crapome_filtering_statistics`) via a
+  new MultiQC section `filtering_statistics_crapomes` in
+  `assets/multiqc_config.yml`. The `expression_distribution` module output
+  was made `optional: true` to allow this. CRAPome-filtered networks are
+  `.mix()`-ed back into the main network/seeds channels alongside (or
+  instead of, on top of) context-filtered ones, so a network can go through
+  context filtering, CRAPome filtering, both, or neither depending on
+  `params.filter_crapomes`.
+- **`4ad7465` "migrated context-specific filtering into a new subworkflow"**
+  (2026-08-31) — extracted the context+CRAPome filtering logic that had
+  accumulated inline in `workflows/diseasemodulediscovery.nf` into a new
+  `subworkflows/local/network_filtering/main.nf` (`NETWORK_FILTERING`
+  workflow), keeping the top-level workflow file leaner. Same commit
+  introduced a `context_key` (`context + "." + source + "." + threshold`)
+  threaded through the samplesheet-parsing and CLI-input paths in
+  `subworkflows/local/utils_nfcore_diseasemodulediscovery_pipeline/main.nf`
+  so repeated context/source/threshold combos dedupe correctly. Also added a
+  first version of `downloadFilteringFile(context, source)` — a Groovy
+  helper using Nextflow's `file(url)` to fetch the GTEx/PaxDB/TCGA/CRAPome
+  source files, called from within the new subworkflow.
+  **Known leftover from this commit:** in `workflows/diseasemodulediscovery.nf`
+  the old inline filtering block (now replaced by the `NETWORK_FILTERING(...)`
+  call) was left in place but commented out with `/* ... */` rather than
+  deleted — dead code that should be cleaned up.
+- **`f62002e` "refactored file download to be handled by nextflow"**
+  (2026-09-01) — moved *all* remaining file downloads (GTEx, PaxDB, TCGA,
+  CRAPome) out of `bin/context_specific_filtering.py` (which previously used
+  `requests.get` directly, including one `verify=False` call added for
+  CRAPome in the prior commit to work around an SSL issue — that workaround
+  is now moot since the script no longer makes HTTP requests) and into
+  Nextflow itself via `downloadFilteringFile()` in the new subworkflow, using
+  a `path(filtering_file)` process input. Nextflow handles retries and lets
+  work-dir caching apply to downloads. `resolve_expression_file()` in the
+  Python script now takes `--filtering_file` instead of a hardcoded URL
+  constant per source. `downloadFilteringFile()` also gained input validation
+  (`error(...)` on an unrecognized `source`, or a TCGA `context` not prefixed
+  `TCGA_`) and fixed a source-name-casing mismatch (`"GTEX"/"CRAPOME"` vs. the
+  actual `"GTEx"/"CRAPome"` values used elsewhere) that would have made GTEx
+  and CRAPome downloads silently return `null` from the first version of the
+  helper.
+  **Also touches `conf/test.config`:** `seeds`/`network` test-data params
+  were commented out and `validate_online`, `run_seed_perturbation`,
+  `run_network_perturbation` flipped to `false`, plus a new `skip_digest =
+  true`. No replacement input (e.g. a test samplesheet) was wired into
+  `test.config` in this commit — **`-profile test` likely has no seeds/network
+  input right now and may not run end-to-end; verify before relying on the
+  test profile.**
+
 ## Open items / things to check next session
 
-- The `source`/`threshold` samplesheet work above is uncommitted on
-  `tissue_specific_filtering` — needs a commit (and ideally an
-  nf-test/CI run with docker, not yet verified end-to-end since no
-  `nextflow` binary was available in the assistant's sandbox).
+- **Push blocked:** `tissue_specific_filtering` is 3 commits ahead of
+  `origin/tissue_specific_filtering` (`3214511`, `4ad7465`, `f62002e` — see
+  above). Not yet pushed as of 2026-09-01.
+- `conf/test.config` has `seeds`/`network` commented out with nothing
+  replacing them (see `f62002e` above) — check whether `-profile test` still
+  runs, or if a samplesheet-based input needs to be added there.
+- Dead commented-out filtering block left in
+  `workflows/diseasemodulediscovery.nf` after the `4ad7465` subworkflow
+  extraction — should be deleted.
 - `af736f2 "failing yaml version of network degree distribution plot"` —
   commit message implies this was left in a broken/failing state; worth
   checking if it was fixed later or still needs attention.
@@ -178,6 +256,9 @@ Design decisions locked in during this work (ask before changing):
   removed and added to `.gitignore`.
 - Confirm whether `tissue_specific_filtering-multiple_filtering_sources` can
   now be deleted/archived since it's fully merged into `tissue_specific_filtering`.
+- Untracked `.nf-test.log` / `.nf-test/` present in the working tree as of
+  2026-09-01 (likely from a local nf-test run) — not committed, check if
+  they should be `.gitignore`d.
 
 ## 2. Exploratory analysis in this repo
 

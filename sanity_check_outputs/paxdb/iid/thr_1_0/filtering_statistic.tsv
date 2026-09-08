@@ -1,0 +1,2 @@
+network	context	genes_in_context	genes_not_in_network_absolute	genes_not_in_network_relative	genes_not_in_expression_file_absolute	genes_not_in_expression_file_relative	genes_filtered_by_threshold_absolute	genes_filtered_by_threshold_relative
+iid.human.Symbol.BRAIN.PAXDB.1.0	<a href=https://pax-db.org/dataset/9606/3536693818/>BRAIN</a>	5266	318	0.024	5397	0.29445141578918654	7737	0.4221179551530362

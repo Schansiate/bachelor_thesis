@@ -1,2 +1,11 @@
-diseasemodulediscovery/
 data/
+modulediscovery_python_dependencies/ 
+.DS_Store
+.Rhistory
+.Rproj.user/
+.nextflow.log
+.nextflow.log.1
+.vscode/
+Rplots.pdf
+ba.Rproj
+*.html

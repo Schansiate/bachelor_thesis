@@ -1,0 +1,2 @@
+network	context	genes_in_context	genes_not_in_network_absolute	genes_not_in_network_relative	genes_not_in_expression_file_absolute	genes_not_in_expression_file_relative	genes_filtered_by_threshold_absolute	genes_filtered_by_threshold_relative
+iid.human.Symbol.Brain_Hippocampus.GTEx.0.1	<a href=https://gtexportal.org/home/tissue/Brain_Hippocampus>Brain_Hippocampus</a>	19182	21143	0.5379076985701928	166	0.009056686125811555	2878	0.15701893174750395

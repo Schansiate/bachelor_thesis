@@ -1,0 +1,576 @@
+---
+title: "KEGG Pathway Enrichment — Alzheimer's Disease Module Runs"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+date: "2026-06-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 14, fig.height = 10, dpi = 120)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(readr)
+  library(stringr)
+  library(tibble)
+  library(ggplot2)
+  library(scales)
+  library(forcats)
+})
+
+theme_set(
+  theme_bw(base_size = 11) +
+    theme(
+      panel.grid.minor  = element_blank(),
+      strip.background  = element_rect(fill = "#f0f0f0", colour = "grey70"),
+      strip.text        = element_text(face = "bold", size = 10),
+      legend.position   = "right"
+    )
+)
+
+# ── Curated list of AD-relevant KEGG pathway codes ───────────────────────────
+AD_PATHWAYS <- c(
+  "KEGG:05010",  # Alzheimer disease
+  "KEGG:05022",  # Pathways of neurodegeneration - multiple diseases
+  "KEGG:04724",  # Glutamatergic synapse
+  "KEGG:04725",  # Cholinergic synapse
+  "KEGG:04721",  # Synaptic vesicle cycle
+  "KEGG:04728",  # Dopaminergic synapse
+  "KEGG:04726",  # Serotonergic synapse
+  "KEGG:04020",  # Calcium signaling pathway
+  "KEGG:04010",  # MAPK signaling pathway
+  "KEGG:04150",  # mTOR signaling pathway
+  "KEGG:04210",  # Apoptosis
+  "KEGG:04140",  # Autophagy - animal
+  "KEGG:04141",  # Protein processing in endoplasmic reticulum
+  "KEGG:04144",  # Endocytosis
+  "KEGG:04310",  # Wnt signaling pathway
+  "KEGG:04330",  # Notch signaling pathway
+  "KEGG:04110",  # Cell cycle
+  "KEGG:05016",  # Huntington disease
+  "KEGG:05014",  # Amyotrophic lateral sclerosis
+  "KEGG:05012"   # Parkinson disease
+)
+
+# ── Neurodegenerative disease pathways (KEGG 05xxx disease section) ───────────
+NEURODEGEN_PATHWAYS <- c(
+  "KEGG:05010",  # Alzheimer disease
+  "KEGG:05022",  # Pathways of neurodegeneration - multiple diseases
+  "KEGG:05012",  # Parkinson disease
+  "KEGG:05016",  # Huntington disease
+  "KEGG:05014",  # Amyotrophic lateral sclerosis
+  "KEGG:05017",  # Spinocerebellar ataxia
+  "KEGG:05020"   # Prion disease
+)
+
+# ── Colour palettes ───────────────────────────────────────────────────────────
+METHOD_COLOURS <- c(
+  diamond         = "#d95f02",
+  domino          = "#7570b3",
+  firstneighbor   = "#1b9e77",
+  no_tool         = "#a6761d",
+  robust          = "#e7298a",
+  robust_bias_aware = "#66a61e",
+  rwr             = "#e6ab02"
+)
+
+PPI_COLOURS <- c(iid = "#4c78a8", string = "#f58518")
+
+FILTER_COLOURS <- c(filtered = "#2ca25f", unfiltered = "#de77ae")
+FILTER_SHAPES  <- c(filtered = 16, unfiltered = 1)
+
+HEATMAP_COLOURS <- colorRampPalette(c("#f7fbff", "#6baed6", "#08519c"))(101)
+```
+
+```{r load-data}
+# ── Metadata parser ───────────────────────────────────────────────────────────
+parse_module <- function(module_id) {
+  method <- str_extract(
+    module_id,
+    "(robust_bias_aware|diamond|domino|firstneighbor|no_tool|robust|rwr)$"
+  )
+  ppi <- case_when(
+    str_detect(module_id, "\\.iid\\.") ~ "iid",
+    str_detect(module_id, "\\.string\\.") ~ "string",
+    TRUE ~ "other"
+  )
+  filter_status <- if_else(
+    str_detect(module_id, "\\.Brain_Hippocampus\\."),
+    "filtered", "unfiltered"
+  )
+  short_label <- paste0(
+    toupper(ppi), " · ",
+    str_replace_all(method, "_", "-"), " · ",
+    if_else(filter_status == "filtered", "flt", "unfl")
+  )
+  tibble(module_id, ppi, method, filter_status, short_label)
+}
+
+# ── Read one run directory ────────────────────────────────────────────────────
+read_run <- function(run_dir, threshold) {
+  kegg_files <- list.files(
+    file.path(run_dir, "evaluation", "gprofiler"),
+    pattern = "\\.KEGG\\.sub_enriched_pathways\\.tsv$",
+    recursive = TRUE, full.names = TRUE
+  )
+
+  map_dfr(kegg_files, function(path) {
+    module_id <- basename(dirname(path))
+    read_tsv(path, show_col_types = FALSE) %>%
+      mutate(module_id = module_id)
+  }) %>%
+    filter(Pathway_name != "KEGG root term") %>%
+    mutate(threshold = threshold)
+}
+
+# ── Load all three thresholds ─────────────────────────────────────────────────
+run_meta <- tibble(
+  run_dir   = sort(list.dirs("alzheimer_symbol_runs", recursive = FALSE,
+                             full.names = TRUE)),
+  threshold = str_extract(basename(run_dir), "[0-9.]+$")
+) %>%
+  filter(!is.na(threshold))
+
+kegg_all <- map2_dfr(run_meta$run_dir, run_meta$threshold, read_run) %>%
+  left_join(
+    map_dfr(unique(.$module_id), parse_module),
+    by = "module_id"
+  ) %>%
+  mutate(
+    neg_log10_padj        = -log10(Padj),
+    is_ad_pathway         = Pathway_code %in% AD_PATHWAYS,
+    is_neurodegen_pathway = Pathway_code %in% NEURODEGEN_PATHWAYS,
+    threshold      = factor(threshold, levels = sort(unique(as.numeric(threshold))))
+  )
+
+# ── Module ordering: PPI → method → filter_status ────────────────────────────
+module_order_tbl <- kegg_all %>%
+  distinct(module_id, ppi, method, filter_status, short_label) %>%
+  mutate(
+    ppi    = factor(ppi, levels = c("iid", "string")),
+    method = factor(method, levels = names(METHOD_COLOURS)),
+    filter_status = factor(filter_status, levels = c("filtered", "unfiltered"))
+  ) %>%
+  arrange(ppi, method, filter_status)
+```
+
+## Overview — enriched KEGG pathways per module
+
+How many KEGG pathways (padj < 0.05) does each module return, broken down by PPI network, AMI method, and filtering status?
+
+```{r count-plot, fig.height=7}
+count_tbl <- kegg_all %>%
+  filter(Padj < 0.05) %>%
+  distinct(threshold, module_id, Pathway_code, ppi, method, filter_status) %>%
+  count(threshold, module_id, ppi, method, filter_status) %>%
+  mutate(
+    method = factor(method, levels = names(METHOD_COLOURS)),
+    filter_status = factor(filter_status, levels = c("filtered", "unfiltered"))
+  )
+
+ggplot(count_tbl,
+       aes(x = filter_status, y = n, fill = filter_status)) +
+  geom_col(width = 0.65, colour = "white", linewidth = 0.3) +
+  geom_text(aes(label = n), vjust = -0.3, size = 3) +
+  facet_grid(ppi ~ method + threshold, scales = "free_y") +
+  scale_fill_manual(values = FILTER_COLOURS, name = "Filter status") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title  = "Number of significant KEGG pathways (padj < 0.05) per module",
+    x      = NULL,
+    y      = "# significant pathways"
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+```
+
+---
+
+## AD-relevant pathways — dot plot comparison
+
+Enrichment of the curated set of Alzheimer's-related KEGG pathways across all modules and thresholds. Dot size = fraction of DE genes; colour = –log₁₀(padj); grey = not significant / not detected.
+
+```{r ad-dotplot, fig.height=11, fig.width=16}
+ad_data <- kegg_all %>%
+  filter(is_ad_pathway) %>%
+  mutate(
+    sig = Padj < 0.05,
+    Fraction_DE = as.numeric(Fraction_DE)
+  )
+
+# For each threshold separately so x-axis stays legible
+plot_ad_dotplot <- function(thr) {
+  d <- ad_data %>% filter(threshold == thr)
+  module_levels <- module_order_tbl %>%
+    filter(module_id %in% d$module_id) %>%
+    pull(short_label)
+
+  pathway_order <- d %>%
+    group_by(Pathway_name) %>%
+    summarise(best = min(Padj, na.rm = TRUE), .groups = "drop") %>%
+    arrange(best) %>%
+    pull(Pathway_name)
+
+  d %>%
+    mutate(
+      short_label   = factor(short_label, levels = module_levels),
+      Pathway_name  = factor(Pathway_name, levels = rev(pathway_order)),
+      alpha_val     = if_else(sig, 1, 0.25)
+    ) %>%
+    ggplot(aes(x = short_label, y = Pathway_name)) +
+    geom_point(aes(size = Fraction_DE, colour = neg_log10_padj,
+                   alpha = alpha_val)) +
+    scale_colour_gradientn(
+      colours = c("#deebf7", "#9ecae1", "#3182bd", "#08306b"),
+      name    = expression(-log[10](p[adj])),
+      limits  = c(0, NA)
+    ) +
+    scale_size_continuous(
+      range = c(1.5, 7), name = "Fraction DE",
+      labels = percent_format(accuracy = 1)
+    ) +
+    scale_alpha_identity() +
+    facet_grid(. ~ ppi, scales = "free_x", space = "free_x") +
+    labs(
+      title = paste0("AD-relevant KEGG pathways — threshold ", thr),
+      x = NULL, y = NULL
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 50, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 9),
+      panel.spacing.x = unit(0.4, "cm")
+    )
+}
+```
+
+### Threshold 0.01
+
+```{r ad-dotplot-001, fig.height=10, fig.width=15}
+plot_ad_dotplot("0.01")
+```
+
+### Threshold 0.1
+
+```{r ad-dotplot-01, fig.height=10, fig.width=15}
+plot_ad_dotplot("0.1")
+```
+
+### Threshold 1
+
+```{r ad-dotplot-1, fig.height=10, fig.width=15}
+plot_ad_dotplot("1")
+```
+
+---
+
+## KEGG heatmaps — top pathways per threshold
+
+Top 25 most consistently enriched pathways (lowest mean padj across modules), shown as –log₁₀(padj). AD-relevant pathways are indicated with ★ in the row label. Modules ordered: PPI → AMI method → filter status.
+
+```{r heatmap-fn}
+# Build a ggplot2 tile heatmap for one threshold
+draw_heatmap <- function(thr, top_n = 25) {
+  d <- kegg_all %>%
+    filter(threshold == thr, Padj < 0.05)
+
+  if (nrow(d) == 0) {
+    message("No significant pathways for threshold ", thr); return(invisible(NULL))
+  }
+
+  # Select top_n pathways by lowest mean padj across all modules they appear in
+  top_pathways <- d %>%
+    group_by(Pathway_name, Pathway_code, is_ad_pathway) %>%
+    summarise(
+      mean_padj  = mean(Padj, na.rm = TRUE),
+      n_modules  = n_distinct(module_id),
+      .groups = "drop"
+    ) %>%
+    arrange(mean_padj) %>%
+    slice_head(n = top_n)
+
+  # Row labels: mark AD pathways
+  top_pathways <- top_pathways %>%
+    mutate(
+      row_label = if_else(
+        is_ad_pathway,
+        paste0("★ ", Pathway_name, " (", Pathway_code, ")"),
+        paste0("  ", Pathway_name, " (", Pathway_code, ")")
+      )
+    )
+
+  # Build the matrix (all modules, even without a hit → NA)
+  module_levels <- module_order_tbl %>%
+    filter(module_id %in% unique(kegg_all$module_id[kegg_all$threshold == thr])) %>%
+    pull(module_id)
+
+  full_grid <- expand_grid(
+    module_id    = module_levels,
+    Pathway_name = top_pathways$Pathway_name
+  )
+
+  plot_data <- full_grid %>%
+    left_join(
+      d %>% select(module_id, Pathway_name, neg_log10_padj, Padj),
+      by = c("module_id", "Pathway_name")
+    ) %>%
+    left_join(
+      module_order_tbl %>% select(module_id, ppi, method, filter_status, short_label),
+      by = "module_id"
+    ) %>%
+    left_join(
+      top_pathways %>% select(Pathway_name, row_label, is_ad_pathway, mean_padj),
+      by = "Pathway_name"
+    ) %>%
+    mutate(
+      short_label  = factor(short_label,
+                            levels = module_order_tbl %>%
+                              filter(module_id %in% module_levels) %>%
+                              pull(short_label)),
+      row_label    = fct_reorder(row_label, -mean_padj),
+      filter_status = factor(filter_status, levels = c("filtered", "unfiltered"))
+    )
+
+  max_val <- max(plot_data$neg_log10_padj, na.rm = TRUE)
+
+  ggplot(plot_data, aes(x = short_label, y = row_label, fill = neg_log10_padj)) +
+    geom_tile(colour = "white", linewidth = 0.35) +
+    # Mark AD pathways with a bold left strip
+    geom_tile(
+      data = plot_data %>% filter(is_ad_pathway),
+      aes(x = short_label, y = row_label),
+      fill = NA, colour = "#d62728", linewidth = 0.7
+    ) +
+    scale_fill_gradientn(
+      colours  = HEATMAP_COLOURS,
+      na.value = "grey92",
+      limits   = c(0, max_val),
+      name     = expression(-log[10](p[adj]))
+    ) +
+    facet_grid(. ~ ppi + filter_status, scales = "free_x", space = "free_x") +
+    labs(
+      title   = paste0("Top ", top_n, " KEGG pathways — threshold ", thr,
+                       "  (★ = AD-relevant; red border = AD pathway)"),
+      x = NULL, y = NULL
+    ) +
+    theme(
+      axis.text.x  = element_text(angle = 55, hjust = 1, size = 7.5),
+      axis.text.y  = element_text(
+        size   = 8,
+        face   = if_else(
+          grepl("^★", levels(plot_data$row_label)),
+          "bold", "plain"
+        )[as.integer(plot_data$row_label)]
+      ),
+      panel.spacing.x = unit(0.3, "cm"),
+      legend.key.height = unit(1.2, "cm")
+    )
+}
+```
+
+### Threshold 0.01
+
+```{r heatmap-001, fig.height=11, fig.width=16}
+draw_heatmap("0.01")
+```
+
+### Threshold 0.1
+
+```{r heatmap-01, fig.height=11, fig.width=16}
+draw_heatmap("0.1")
+```
+
+### Threshold 1
+
+```{r heatmap-1, fig.height=11, fig.width=16}
+draw_heatmap("1")
+```
+
+---
+
+## Filtered vs. unfiltered — paired pathway enrichment
+
+For each AMI method and PPI network, how does filtering shift the enrichment of AD-relevant pathways? Each line connects a filtered–unfiltered pair for the same method + PPI combination. Points above the diagonal → filtering *increases* enrichment.
+
+```{r paired-scatter, fig.height=8, fig.width=11}
+paired <- kegg_all %>%
+  filter(is_ad_pathway) %>%
+  select(threshold, module_id, Pathway_name, neg_log10_padj,
+         ppi, method, filter_status) %>%
+  pivot_wider(
+    id_cols    = c(threshold, ppi, method, Pathway_name),
+    names_from = filter_status,
+    values_from = neg_log10_padj,
+    values_fill = 0
+  ) %>%
+  mutate(
+    method = factor(method, levels = names(METHOD_COLOURS)),
+    diff   = filtered - unfiltered
+  )
+
+ggplot(paired, aes(x = unfiltered, y = filtered, colour = method)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_point(alpha = 0.7, size = 2.5, aes(shape = ppi)) +
+  scale_colour_manual(values = METHOD_COLOURS, name = "Method") +
+  scale_shape_manual(values = c(iid = 16, string = 17), name = "PPI") +
+  facet_grid(threshold ~ Pathway_name, labeller = label_wrap_gen(width = 18)) +
+  labs(
+    title = "Filtered vs. unfiltered enrichment for AD-relevant pathways",
+    subtitle = "Points above the dashed line = filtering increased –log₁₀(padj)",
+    x = expression("Unfiltered  " * -log[10](p[adj])),
+    y = expression("Filtered  " * -log[10](p[adj]))
+  ) +
+  theme(
+    axis.text = element_text(size = 7),
+    strip.text = element_text(size = 7.5)
+  )
+```
+
+---
+
+## Filtering gain — AD pathway enrichment delta
+
+Mean change in –log₁₀(padj) for AD-relevant pathways when applying the Brain Hippocampus filter (filtered minus unfiltered), per AMI method, PPI, and threshold. Positive = filtering helps.
+
+```{r delta-plot, fig.height=7, fig.width=12}
+delta_tbl <- kegg_all %>%
+  filter(is_ad_pathway) %>%
+  select(threshold, ppi, method, filter_status, Pathway_name, neg_log10_padj) %>%
+  pivot_wider(
+    id_cols    = c(threshold, ppi, method, Pathway_name),
+    names_from = filter_status,
+    values_from = neg_log10_padj,
+    values_fill = 0
+  ) %>%
+  mutate(delta = filtered - unfiltered) %>%
+  group_by(threshold, ppi, method) %>%
+  summarise(mean_delta = mean(delta, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    method    = factor(method, levels = names(METHOD_COLOURS)),
+    threshold = factor(threshold)
+  )
+
+ggplot(delta_tbl,
+       aes(x = method, y = mean_delta, fill = method, alpha = threshold)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7, colour = "white") +
+  geom_hline(yintercept = 0, colour = "grey30") +
+  scale_fill_manual(values = METHOD_COLOURS, guide = "none") +
+  scale_alpha_manual(
+    values = c("0.01" = 0.45, "0.1" = 0.7, "1" = 1),
+    name   = "Threshold"
+  ) +
+  facet_wrap(~ ppi, ncol = 2) +
+  labs(
+    title    = "Mean enrichment gain for AD pathways: filtered − unfiltered",
+    subtitle = "Positive = Brain Hippocampus filter increased AD pathway enrichment",
+    x = NULL,
+    y = expression(Delta ~ mean(-log[10](p[adj])))
+  ) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+```
+
+---
+
+## Filtering gain — neurodegenerative disease pathways
+
+Same analysis as above but restricted to the seven KEGG neurodegenerative disease pathways (hsa05xxx section): Alzheimer, Parkinson, Huntington, ALS, Spinocerebellar ataxia, Prion disease, and the multi-disease neurodegeneration umbrella pathway. The per-pathway breakdown shows which specific diseases benefit most from the Brain Hippocampus filter.
+
+```{r neurodegen-delta-perpathway, fig.height=8, fig.width=13}
+neurodegen_delta <- kegg_all %>%
+  filter(is_neurodegen_pathway) %>%
+  select(threshold, ppi, method, filter_status, Pathway_name, Pathway_code,
+         neg_log10_padj) %>%
+  pivot_wider(
+    id_cols    = c(threshold, ppi, method, Pathway_name, Pathway_code),
+    names_from = filter_status,
+    values_from = neg_log10_padj,
+    values_fill = 0
+  ) %>%
+  mutate(
+    delta  = filtered - unfiltered,
+    method = factor(method, levels = names(METHOD_COLOURS)),
+    ppi    = factor(ppi, levels = c("iid", "string")),
+    threshold = factor(threshold)
+  )
+
+# Short pathway labels
+pathway_short <- c(
+  "Alzheimer disease"                            = "Alzheimer",
+  "Pathways of neurodegeneration - multiple diseases" = "Neurodegeneration\n(multi-disease)",
+  "Parkinson disease"                            = "Parkinson",
+  "Huntington disease"                           = "Huntington",
+  "Amyotrophic lateral sclerosis"                = "ALS",
+  "Spinocerebellar ataxia"                       = "Spinocerebellar\nataxia",
+  "Prion disease"                                = "Prion disease"
+)
+
+neurodegen_delta <- neurodegen_delta %>%
+  mutate(pathway_short = recode(Pathway_name, !!!pathway_short))
+
+ggplot(neurodegen_delta,
+       aes(x = method, y = delta, fill = method, alpha = threshold)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7,
+           colour = "white", linewidth = 0.2) +
+  geom_hline(yintercept = 0, colour = "grey30", linewidth = 0.4) +
+  scale_fill_manual(values = METHOD_COLOURS, guide = "none") +
+  scale_alpha_manual(
+    values = c("0.01" = 0.4, "0.1" = 0.7, "1" = 1),
+    name   = "Threshold"
+  ) +
+  facet_grid(ppi ~ pathway_short) +
+  labs(
+    title    = "Filtering gain per neurodegenerative disease pathway",
+    subtitle = "Positive = Brain Hippocampus filter increased enrichment (filtered − unfiltered)",
+    x = NULL,
+    y = expression(Delta ~ -log[10](p[adj]))
+  ) +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1, size = 7.5))
+```
+
+### Absolute enrichment — filtered vs. unfiltered side by side
+
+```{r neurodegen-abs, fig.height=7, fig.width=13}
+neurodegen_abs <- kegg_all %>%
+  filter(is_neurodegen_pathway) %>%
+  mutate(
+    method        = factor(method, levels = names(METHOD_COLOURS)),
+    filter_status = factor(filter_status, levels = c("filtered", "unfiltered")),
+    threshold     = factor(threshold),
+    pathway_short = recode(Pathway_name, !!!pathway_short)
+  )
+
+ggplot(neurodegen_abs,
+       aes(x = method, y = neg_log10_padj,
+           colour = filter_status, shape = threshold)) +
+  geom_point(size = 2.8, alpha = 0.85,
+             position = position_dodge(width = 0.6)) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed",
+             colour = "grey50", linewidth = 0.4) +
+  scale_colour_manual(values = FILTER_COLOURS, name = "Filter status") +
+  scale_shape_manual(values = c("0.01" = 15, "0.1" = 17, "1" = 16),
+                     name = "Threshold") +
+  facet_grid(ppi ~ pathway_short) +
+  labs(
+    title    = "Enrichment of neurodegenerative disease pathways across all modules",
+    subtitle = "Dashed line = padj 0.05 significance threshold",
+    x = NULL,
+    y = expression(-log[10](p[adj]))
+  ) +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1, size = 7.5))
+```
+
+---
+
+## Session info
+
+```{r session-info, echo=TRUE}
+sessionInfo()
+```
