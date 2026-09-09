@@ -9,3 +9,5 @@ modulediscovery_python_dependencies/
 Rplots.pdf
 ba.Rproj
 *.html
+*.log
+.ipynb*
