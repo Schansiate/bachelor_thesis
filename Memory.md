@@ -1,6 +1,6 @@
 # Memory.md — PPI Network Filtering for Disease Module Detection (thesis project)
 
-_Last updated: 2026-09-01_
+_Last updated: 2026-09-09_
 
 ## Project summary
 
@@ -324,3 +324,101 @@ produces `paxdb_all_tissues.tsv` consumed by
   staged, the 3 new notebooks are untracked. Repo is also still mid-merge
   (diverged from `origin/main`, unresolved `git merge` in progress) —
   unrelated to this session's work, flagged but not touched.
+
+## 3. Validation pipeline runs (2026-09-01 → 2026-09-09): alzheimer's, diabetes I/II, LUAD
+
+Four full `nf-core/diseasemodulediscovery` runs (`-r tissue_specific_filtering`,
+DaiSyBio cluster profile) used to validate context-specific filtering against
+real disease seed sets. These are distinct from the earlier
+`alzheimer_symbol_runs/` exploratory runs mentioned in `CLAUDE.md`'s timeline
+— that older run is superseded by the `alzheimers_validtaion_run` described
+here.
+
+**Locations:**
+- `data/results/alzheimers_validtaion_run/`
+- `data/results/diabetes_typeI_validtaion_run/`
+- `data/results/diabetes_typeII_validtaion_run/`
+- `LUAD_validtaion_run/` (repo root, **not** under `data/` — see gitignore
+  note below)
+
+All four share the same output layout: `input/` (filtered networks/seeds),
+`disease_modules/{graphml,gt,tsv_nodes,tsv_edges}`, `evaluation/{gprofiler,
+seed_perturbation[,digest]}`, `mqc_summaries/`, `pipeline_info/`.
+
+**Common run config** (confirmed from each run's latest `pipeline_info/
+params_*.json`): samplesheet-driven input (`--input <disease>_samplesheet.csv`,
+not `--seeds`/`--network`), `id_space: symbol`, `run_seed_perturbation: true`,
+`run_network_perturbation: false`, `filter_crapomes: false`,
+`skip_visualization/skip_drug_predictions/skip_digest: true`, all three AMI
+skip flags `false` (DOMINO, DIAMOnD, ROBUST all run) — so 6 module-detection
+tools per network combo: `domino`, `diamond`, `robust`, `robust_bias_aware`,
+`firstneighbor`, `rwr`. Each samplesheet crosses 2 background networks
+(`string_min900`, `iid`) × 2 filtering contexts × 5 thresholds
+(`0.1, 1, 2, 5, 10`) = 20 filtered-network rows per disease.
+
+**Per-disease specifics:**
+- **Alzheimer's** — seeds from `data/alzheimers_filtered_seeds/symbol_seeds.tsv`
+  (samplesheet at `data/alzheimers_samplesheet.csv`). Contexts:
+  `Brain_Hippocampus`/GTEx and `Brain`/PAXDB.
+- **Diabetes type I** — seeds from `data/diabetes_type_I_seeds/symbol_seeds.tsv`
+  (samplesheet `data/diabetes_typeI_samplesheet.csv`). Contexts:
+  `Pancreas`/GTEx and `Pancreas`/PAXDB.
+- **Diabetes type II** — seeds from `data/diabetes_type_II_seeds/symbol_seeds.tsv`
+  (samplesheet `data/diabetes_typeII_samplesheet.csv`). Identical context
+  structure to type I (`Pancreas`/GTEx, `Pancreas`/PAXDB), different seed set
+  — intended as the tissue-specific vs. systemic-disease comparison pair
+  described in `CLAUDE.md` (both map to the same tissue, so this pair tests
+  whether T1D vs. T2D seed sets respond differently to the same filtering,
+  not a tissue-specific-vs-systemic contrast).
+- **LUAD** (lung adenocarcinoma) — seeds from
+  `data/LUAD_seeds/symbol_seeds.tsv` (samplesheet `data/LUAD_samplesheet.csv`).
+  First validation run to combine a **cancer-context filter** (`TCGA_LUAD`/TCGA)
+  with a **tissue filter** (`Lung`/GTEx) for the same disease in one
+  samplesheet — direct test of the TCGA filtering source added in the
+  `tissue_specific_filtering-multiple_filtering_sources` branch (§1 above).
+  Only 94 module files vs. 154 for the other three runs — fewer completed
+  network/tool combinations; not yet root-caused, check
+  `pipeline_info/execution_trace_*.txt` for failed tasks before treating LUAD
+  results as complete. Ran across three separate invocations
+  (`pipeline_info` timestamps 2026-09-08 13:37, 2026-09-08 20:19, 2026-09-09
+  10:39), i.e. resumed at least twice.
+
+**Known issues / open items:**
+- **Alzheimer's `mqc_summaries/` has stray files** literally named after a
+  Groovy meta map's `toString()` (e.g. `[id:iid.human.Symbol.Brain.PAXDB.1,
+  network_id:iid.human.Symbol.Brain.PAXDB.1]`, containing what looks like a
+  single-network `topology_mqc.tsv` row) sitting alongside the correctly
+  named `topology_mqc.tsv`. Diabetes I/II and LUAD do **not** have this
+  artifact, so whatever produced it (likely a `publishDir` output whose
+  filename channel wasn't set before some later fix) was probably avoided or
+  fixed by the time those ran — worth diffing pipeline commits/config between
+  the alzheimer's run dates (started 2026-09-01) and the diabetes runs
+  (started ~2026-09-06) if this needs root-causing.
+- **Alzheimer's run output directory is not "clean" relative to its own final
+  config.** It additionally contains `modules_visualized/`,
+  `modules_visualized_with_drugs/`, `drug_prioritization/`, and
+  `evaluation/digest/`, plus `drugstone_link_mqc.tsv`,
+  `network_perturbation_mqc.tsv`/`network_perturbation_jaccard_mqc.yaml`,
+  `digest_reference_based/free_mqc.tsv`, and `warn_drugstone_max_nodes_mqc.tsv`
+  in `mqc_summaries/` — none of which diabetes I/II or LUAD have. But the
+  *latest* `params_2026-09-06_00-33-38.json` for this run has
+  `skip_visualization/skip_drug_predictions/skip_digest: true` and
+  `run_network_perturbation: false`, matching the other three runs. This run
+  spanned 2026-09-01 → 2026-09-06 with several `-resume` invocations (5+
+  distinct `pipeline_info` trace timestamps) and evidently had those features
+  turned on in an earlier invocation before being switched off — the leftover
+  files are stale from that earlier config, not part of the final validated
+  setup. Don't read anything into their presence/content without checking
+  which run date produced them.
+- **Gitignore inconsistency:** `data/` is entirely gitignored in this repo,
+  so `alzheimers_validtaion_run/`, `diabetes_typeI_validtaion_run/`, and
+  `diabetes_typeII_validtaion_run/` (all under `data/results/`) are silently
+  untracked. `LUAD_validtaion_run/` lives at the repo root instead and shows
+  up as untracked (`??`) in `git status` rather than being ignored — appears
+  to be a placement inconsistency (LUAD should probably move under
+  `data/results/` for consistency, or a root-level results convention is
+  being started and the other three should move up) — ask before moving
+  anything since these are large run outputs.
+- None of these four run outputs are committed or backed up anywhere except
+  this NFS checkout — worth confirming whether any are needed for the thesis
+  writeup before considering cleanup.
