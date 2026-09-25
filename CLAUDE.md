@@ -22,6 +22,23 @@ Integrate tissue- and disease-specific filtering of protein-protein interaction 
 
 ---
 
+### Environment note — this is a compute-only checkout
+
+`/nfs/home/students/m.tan/BA` (this directory) is on an **institutional remote
+SSH server**, used only for **running computations** — executing the Nextflow
+pipeline, storing run outputs (`alzheimer_*` dirs, `data/`,
+`filtered_networks_*`), and other compute-heavy work. Code is **not
+developed here**: source changes to the pipeline fork and to thesis
+notebooks/scripts are written and committed on the local machine, then
+pushed to GitHub and pulled here to execute. Treat any git checkouts under
+this directory (e.g. `diseasemodulediscovery/`) as **execution copies** that
+may lag behind what's been pushed from the local dev machine — always check
+`git status`/`git log` against `origin` here rather than assuming this copy
+is authoritative or up to date, and don't rely on this location for
+day-to-day editing workflows (e.g. IDE-integrated git operations).
+
+---
+
 ## Theoretical Background
 
 ### Disease Module Identification

@@ -11,3 +11,6 @@ ba.Rproj
 *.html
 *.log
 .ipynb*
+results_analysis_output
+sanity_check_outputs
+
