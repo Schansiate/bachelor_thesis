@@ -1,0 +1,2 @@
+network	context	genes_in_context	genes_not_in_network_absolute	genes_not_in_network_relative	genes_not_in_expression_file_absolute	genes_not_in_expression_file_relative	genes_filtered_by_threshold_absolute	genes_filtered_by_threshold_relative
+iid.human.Symbol.TCGA_GBM.TCGA.0.1	TCGA_GBM	23393	22731	0.5548612297703029	93	0.00507392656446069	2486	0.13563205848655135
